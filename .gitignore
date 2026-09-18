@@ -1,0 +1,18 @@
+# Secrets
+.env
+
+# Données (volumineuses, à télécharger depuis l'INSEE)
+data/*
+!data/README.md
+
+# Sorties générées
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
