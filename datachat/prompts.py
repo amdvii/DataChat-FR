@@ -1,4 +1,4 @@
-"""Prompts envoyés au LLM : un pour planifier, un pour rédiger la réponse."""
+# les 2 prompts envoyés au LLM : un pour faire le plan, un pour rédiger la réponse
 
 PROMPT_PLANIFICATION = """Tu es le planificateur de DataChat-FR, un agent qui répond à des questions \
 sur les flux de mobilité résidentielle entre communes françaises (données INSEE, années {annees}).
