@@ -1,59 +1,77 @@
-"""Prépare les fichiers bruts INSEE pour DataChat-FR.
-
-Reprend l'ETL d'UrbanFlows-FR (notebook 01_tri_donnees) :
-- lecture des fichiers base-flux-mobilite-residentielle-{annee}.csv
-- détection automatique de la colonne NBFLUX_* (son nom change selon le millésime)
-- suppression des flux venant de l'étranger (codes 99xxx), des flux intra-communaux et des flux nuls
-- fusion des millésimes dans data/flux_migratoire_triee.csv
-
-Usage :
-    python scripts/prepare_insee.py --raw data/raw --out data/flux_migratoire_triee.csv
-"""
-
-from __future__ import annotations
-
 import argparse
 import re
 from pathlib import Path
 
 import pandas as pd
 
-RENOMMAGE = {"CODGEO": "code_dest", "LIBGEO": "nom_dest", "DCRAN": "code_orig", "L_DCRAN": "nom_orig"}
+# Prépare les fichiers bruts INSEE pour DataChat-FR.
+# C'est le même ETL que dans UrbanFlows-FR (notebook 01_tri_donnees) :
+#   - lecture des base-flux-mobilite-residentielle-{annee}.csv
+#   - suppression des flux venant de l'étranger, des flux dans la même ville et des flux vides
+#   - fusion de toutes les années dans data/flux_migratoire_triee.csv
+#
+# Utilisation :
+#   python scripts/prepare_insee.py --raw data/raw --out data/flux_migratoire_triee.csv
 
 
-def lire_millesime(chemin: Path) -> pd.DataFrame:
-    annee = int(re.search(r"(20\d{2})", chemin.stem).group(1))
+def lire_annee(chemin):
+    annee = int(re.search(r'(20\d{2})', chemin.stem).group(1))
+
+    #certaines années sont encodées en latin-1
     try:
-        df = pd.read_csv(chemin, sep=";", dtype={"CODGEO": str, "DCRAN": str})
-    except UnicodeDecodeError:  # certains millésimes sont encodés en Latin-1
-        df = pd.read_csv(chemin, sep=";", dtype={"CODGEO": str, "DCRAN": str}, encoding="latin-1")
-    col_flux = next(c for c in df.columns if c.startswith("NBFLUX"))
-    df = df.rename(columns={**RENOMMAGE, col_flux: "flux"})
-    df["annee"] = annee
-    df = df[~df["code_orig"].str.startswith("99", na=False)]
-    df = df[df["code_dest"] != df["code_orig"]]
-    df = df.dropna(subset=["flux"])
-    df = df[df["flux"] > 0]
-    print(f"  {chemin.name} : {len(df):,} flux".replace(",", " "))
-    return df[["annee", "code_orig", "nom_orig", "code_dest", "nom_dest", "flux"]]
+        df = pd.read_csv(chemin, sep=';', dtype={'CODGEO': str, 'DCRAN': str})
+    except UnicodeDecodeError:
+        df = pd.read_csv(chemin, sep=';', dtype={'CODGEO': str, 'DCRAN': str}, encoding='latin-1')
+
+    #le nom de la colonne des flux change selon l'année (NBFLUX_C18_POP01P, etc)
+    nom_col_flux = ''
+    for col in df.columns:
+        if 'NBFLUX' in col:
+            nom_col_flux = col
+
+    #On renomme pour + de clarté
+    df = df.rename(columns={
+        'CODGEO': 'code_dest',
+        'LIBGEO': 'nom_dest',
+        'DCRAN': 'code_orig',
+        'L_DCRAN': 'nom_orig',
+        nom_col_flux: 'flux'
+    })
+    df['annee'] = annee
+    df = df[~df['code_orig'].str.startswith('99', na=False)] #les flux venant de l'étranger (99) sont supprimés
+    df = df[df['code_dest'] != df['code_orig']] #les personnes qui déménagent dans la même ville sont supprimées
+    df = df.dropna(subset=['flux']) #on enlève les cases vides ou = à zéro
+    df = df[df['flux'] > 0]
+
+    nb = f"{len(df):,}".replace(',', ' ')
+    print(f"  {chemin.name} : {nb} flux")
+    return df[['annee', 'code_orig', 'nom_orig', 'code_dest', 'nom_dest', 'flux']]
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--raw", default="data/raw", help="Dossier des CSV INSEE bruts")
-    parser.add_argument("--out", default="data/flux_migratoire_triee.csv")
+def main():
+    parser = argparse.ArgumentParser(description="Prépare les fichiers bruts INSEE pour DataChat-FR")
+    parser.add_argument('--raw', default='data/raw', help="Dossier des CSV INSEE bruts")
+    parser.add_argument('--out', default='data/flux_migratoire_triee.csv')
     args = parser.parse_args()
 
-    fichiers = sorted(Path(args.raw).glob("base-flux-mobilite-residentielle-*.csv"))
+    fichiers = sorted(Path(args.raw).glob('base-flux-mobilite-residentielle-*.csv'))
     if not fichiers:
         raise SystemExit(f"Aucun fichier base-flux-mobilite-residentielle-*.csv dans {args.raw}")
 
-    print("Lecture des millésimes INSEE :")
-    flux = pd.concat([lire_millesime(f) for f in fichiers], ignore_index=True)
+    print("Lecture des fichiers INSEE...")
+    liste_df = []
+    for f in fichiers:
+        liste_df.append(lire_annee(f))
+
+    #On fusionne...
+    print("Fusion...")
+    df_final = pd.concat(liste_df, ignore_index=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    flux.to_csv(args.out, sep=";", index=False)
-    print(f"✅ {len(flux):,} flux enregistrés dans {args.out}".replace(",", " "))
+    df_final.to_csv(args.out, sep=';', index=False)
+
+    nb = f"{len(df_final):,}".replace(',', ' ')
+    print(f"Terminé, {nb} flux sauvegardés dans {args.out}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
